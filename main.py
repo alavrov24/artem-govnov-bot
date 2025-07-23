@@ -31,9 +31,6 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app for webhook
 app = Flask(__name__)
 
-# Global executor for handling async operations
-executor = ThreadPoolExecutor(max_workers=20)
-
 # Initialize DeepSeek
 llm = ChatOpenAI(
     api_key=DEEPSEEK_API_KEY,
@@ -124,7 +121,6 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
         except Exception as reply_error:
             logger.error(f"Failed to send error message: {reply_error}")
-            # Don't try to send another message if reply failed
 
 async def setup_bot():
     """Initialize the bot application"""
@@ -154,7 +150,7 @@ async def setup_bot():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle incoming webhook requests from Telegram"""
+    """Handle incoming webhook requests from Telegram - FIXED VERSION"""
     if IS_LOCAL:
         return "Webhook disabled for local testing", 200
         
@@ -166,36 +162,32 @@ def webhook():
             
         update = Update.de_json(update_dict, bot_application.bot)
         
-        # Process the update in executor with proper async handling
-        def process_update():
+        # FIXED: Use asyncio.run_coroutine_threadsafe instead of manual loop management
+        # This properly schedules the coroutine on the existing event loop
+        if hasattr(bot_application, '_running_loop') and bot_application._running_loop:
+            # If we have access to the running loop, use it
+            future = asyncio.run_coroutine_threadsafe(
+                bot_application.process_update(update), 
+                bot_application._running_loop
+            )
             try:
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Run the update processing
-                loop.run_until_complete(bot_application.process_update(update))
-                
+                future.result(timeout=30)  # Wait for completion with timeout
             except Exception as e:
-                logger.error(f"Error in process_update thread: {e}")
-            finally:
-                # Make sure to close the loop properly
-                try:
-                    # Cancel all running tasks
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    
-                    # Wait for tasks to complete cancellation
-                    if pending:
-                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                    
-                    # Close the loop
-                    loop.close()
-                except Exception as cleanup_error:
-                    logger.error(f"Error during loop cleanup: {cleanup_error}")
+                logger.error(f"Error processing update: {e}")
+        else:
+            # Fallback: create a task in the current thread's event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Schedule as a task if loop is already running
+                    asyncio.create_task(bot_application.process_update(update))
+                else:
+                    # Run directly if no loop is running
+                    loop.run_until_complete(bot_application.process_update(update))
+            except RuntimeError:
+                # If no event loop exists, create one just for this operation
+                asyncio.run(bot_application.process_update(update))
         
-        executor.submit(process_update)
         return "OK", 200
         
     except Exception as e:
@@ -276,7 +268,6 @@ async def main():
             
             # Keep running until interrupted
             try:
-                # Simple infinite loop - no complex async tasks
                 while True:
                     await asyncio.sleep(1)
             except KeyboardInterrupt:
@@ -288,6 +279,9 @@ async def main():
             # Start the application for webhook mode
             await bot_application.start()
             
+            # Store reference to the event loop for webhook handler
+            bot_application._running_loop = asyncio.get_running_loop()
+            
             # Start Flask in a separate thread
             flask_thread = threading.Thread(target=run_flask, daemon=True)
             flask_thread.start()
@@ -295,7 +289,7 @@ async def main():
             logger.info(f"🌐 Flask server started on port {PORT}")
             logger.info("✅ Bot successfully deployed on Render!")
             
-            # Keep the main thread alive - simple approach
+            # Keep the main thread alive
             try:
                 while True:
                     await asyncio.sleep(60)
@@ -308,14 +302,10 @@ async def main():
     finally:
         logger.info("🧹 Cleaning up resources...")
         
-        # Shutdown executor
-        executor.shutdown(wait=True)
-        logger.info("📦 ThreadPoolExecutor shutdown complete")
-        
         # Shutdown bot application
         if bot_application:
             try:
-                if bot_application.updater.running:
+                if hasattr(bot_application, 'updater') and bot_application.updater.running:
                     await bot_application.updater.stop()
                 await bot_application.stop()
                 await bot_application.shutdown()
