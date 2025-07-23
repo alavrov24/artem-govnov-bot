@@ -107,9 +107,16 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {context_str}
         """
 
-        # Use async invocation
-        response = await llm.ainvoke(prompt)
-        await update.message.reply_text(response.content)
+        # Use async invocation with timeout
+        try:
+            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=30.0)
+            await update.message.reply_text(response.content)
+        except asyncio.TimeoutError:
+            logger.error("DeepSeek API timeout")
+            await update.message.reply_text("⏰ Время ответа истекло, попробуй еще раз")
+        except Exception as api_error:
+            logger.error(f"DeepSeek API error: {api_error}")
+            await update.message.reply_text("🤖 Что-то пошло не так с моими мозгами")
         
     except Exception as e:
         logger.error(f"❌ Error generating response: {e}")
@@ -117,6 +124,7 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
         except Exception as reply_error:
             logger.error(f"Failed to send error message: {reply_error}")
+            # Don't try to send another message if reply failed
 
 async def setup_bot():
     """Initialize the bot application"""
@@ -158,15 +166,34 @@ def webhook():
             
         update = Update.de_json(update_dict, bot_application.bot)
         
-        # Process the update in executor
+        # Process the update in executor with proper async handling
         def process_update():
-            # Create new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the update processing
                 loop.run_until_complete(bot_application.process_update(update))
+                
+            except Exception as e:
+                logger.error(f"Error in process_update thread: {e}")
             finally:
-                loop.close()
+                # Make sure to close the loop properly
+                try:
+                    # Cancel all running tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Wait for tasks to complete cancellation
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    # Close the loop
+                    loop.close()
+                except Exception as cleanup_error:
+                    logger.error(f"Error during loop cleanup: {cleanup_error}")
         
         executor.submit(process_update)
         return "OK", 200
