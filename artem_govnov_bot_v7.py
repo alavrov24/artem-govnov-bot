@@ -1,3 +1,4 @@
+import asyncio
 import random
 from collections import defaultdict, deque
 from telegram import Update
@@ -122,7 +123,7 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
 
 
-def main():
+"""def main():
     print("🤖 Запуск бота Артёма Говнова...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
@@ -140,4 +141,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()"""
+
+async def main():
+    print("🤖 Запуск бота Артёма Говнова...")
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    application.add_handler(MessageHandler(mention_filter(), handle_mention))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
+    application.add_handler(MessageHandler(filters.TEXT & filters.Entity("mention"), handle_mention))
+
+    await application.run_polling()
+    print("🛑 Бот остановлен")
+
+if __name__ == "__main__":
+    asyncio.run(main())
