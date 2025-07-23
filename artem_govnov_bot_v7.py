@@ -1,4 +1,3 @@
-import asyncio
 import random
 from collections import defaultdict, deque
 from telegram import Update
