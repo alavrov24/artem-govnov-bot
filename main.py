@@ -17,7 +17,7 @@ from langchain_openai import ChatOpenAI
 TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"]
 DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
 BOT_USERNAME     = os.environ.get("BOT_USERNAME", "")
-WEBHOOK_URL      = os.environ["WEBHOOK_URL"]  # e.g. https://your-service.onrender.com/webhook
+WEBHOOK_URL      = os.environ["WEBHOOK_URL"].rstrip("/")  # e.g. https://your-service.onrender.com
 PORT             = int(os.environ.get("PORT", "5000"))
 
 # ─── Initialize LLM & State ─────────────────────────────────────────────────
@@ -33,15 +33,14 @@ recent_messages = defaultdict(lambda: deque(maxlen=500))
 
 # ─── Handlers ─────────────────────────────────────────────────────────────────
 async def store_messages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not (msg := update.message) or not msg.text:
+    msg = update.message
+    if not msg or not msg.text:
         return
 
+    chat_id = msg.chat_id
     name = msg.from_user.first_name or "Unknown"
-    chat_id = update.effective_chat.id
-    line = f"{name}: {msg.text}"
-    recent_messages[chat_id].append(line)
+    recent_messages[chat_id].append(f"{name}: {msg.text}")
 
-    # 1% chance to reply randomly
     if random.randint(1, 100) == 1:
         await ctx.bot.send_chat_action(chat_id, "typing")
         question = msg.text.replace(BOT_USERNAME, "").strip()
@@ -93,26 +92,28 @@ async def handle_mention(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.reply_text(f"🚨 Ошибка LLM: {e}")
 
-
 # ─── Main ─────────────────────────────────────────────────────────────────────
 async def main():
+    # Build the app
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
     app.add_handler(MessageHandler(mention_filter(), handle_mention))
 
-    # Remove any previous webhook to avoid conflicts
-    await app.bot.delete_webhook()
-    # Ensure your WEBHOOK_URL ends in /webhook
-    url = WEBHOOK_URL
-    await app.bot.set_webhook(url)
+    # Clean up any previous webhook
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    # Set the new webhook (must include /webhook path)
+    webhook_path = "/webhook"
+    full_webhook_url = WEBHOOK_URL + webhook_path
+    await app.bot.set_webhook(full_webhook_url)
+    print(f"✅ Webhook set to {full_webhook_url}")
 
     # Start the built‑in webhook server
-    print(f"✅ Webhook set to {url}")
     await app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        webhook_path="/webhook",
-        webhook_url=url,
+        url_path=webhook_path,
+        drop_pending_updates=True,
     )
 
 if __name__ == "__main__":
