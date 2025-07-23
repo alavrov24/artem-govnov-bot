@@ -1,3 +1,2 @@
 python-telegram-bot==20.6
 langchain-openai==0.3.16
-Flask==3.1.1
