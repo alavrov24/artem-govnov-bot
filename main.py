@@ -9,9 +9,9 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from langchain_openai import ChatOpenAI
 
 # ===== CONFIGURATION =====
-TELEGRAM_TOKEN = "7238766929:AAGcm89ifMhxDGflOEZ1byrNJEHPqQJk9us"    
-DEEPSEEK_API_KEY = "sk-4939b297292b425d888e1ccd2186cb97"
-BOT_USERNAME = "@artem_govnov_bot" 
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+BOT_USERNAME = os.environ.get("BOT_USERNAME")
 
 # Initialize DeepSeek/OpenAI LLM
 llm = ChatOpenAI(
