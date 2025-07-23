@@ -102,16 +102,17 @@ async def main():
 
     # Remove any previous webhook to avoid conflicts
     await app.bot.delete_webhook()
-
-    await app.bot.set_webhook(WEBHOOK_URL)
+    # Ensure your WEBHOOK_URL ends in /webhook
+    url = WEBHOOK_URL
+    await app.bot.set_webhook(url)
 
     # Start the built‑in webhook server
-    print(f"✅ Webhook set to {WEBHOOK_URL}")
+    print(f"✅ Webhook set to {url}")
     await app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         webhook_path="/webhook",
-        webhook_url=WEBHOOK_URL,
+        webhook_url=url,
     )
 
 if __name__ == "__main__":
