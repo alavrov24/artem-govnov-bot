@@ -18,7 +18,7 @@ llm = ChatOpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url="https://api.deepseek.com/v1",
     model="deepseek-chat",
-    temperature=1.5,
+    temperature=2.0,
     max_tokens=1024
 )
 
