@@ -111,7 +111,7 @@ async def main():
         listen="0.0.0.0",
         port=PORT,
         webhook_path="/webhook",
-        webhook_url=url,
+        webhook_url=WEBHOOK_URL,
     )
 
 if __name__ == "__main__":
