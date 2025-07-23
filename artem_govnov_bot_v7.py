@@ -1,12 +1,12 @@
-import asyncio
 import random
+import asyncio
 from collections import defaultdict, deque
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from langchain_openai import ChatOpenAI
 
 # ===== CONFIGURATION =====
-TELEGRAM_TOKEN = "7238766929:AAGcm89ifMhxDGflOEZ1byrNJEHPqQJk9us"     # From @BotFather
+TELEGRAM_TOKEN = "7238766929:AAGcm89ifMhxDGflOEZ1byrNJEHPqQJk9us"    
 DEEPSEEK_API_KEY = "sk-4939b297292b425d888e1ccd2186cb97"
 BOT_USERNAME = "@artem_govnov_bot" 
 # =========================
@@ -123,36 +123,17 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
 
 
-"""def main():
-    print("🤖 Запуск бота Артёма Говнова...")
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    application.add_handler(MessageHandler(mention_filter(), handle_mention))
-
-    # Store all messages (for context history)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
-
-    # Handle bot mentions
-    application.add_handler(MessageHandler(filters.TEXT & filters.Entity("mention"), handle_mention))
-
-    # Start polling
-    application.run_polling()
-    print("🛑 Бот остановлен")
-
-
-if __name__ == "__main__":
-    main()"""
 
 async def main():
-    print("🤖 Запуск бота Артёма Говнова...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
+    # регистратор хендлеров
     application.add_handler(MessageHandler(mention_filter(), handle_mention))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
     application.add_handler(MessageHandler(filters.TEXT & filters.Entity("mention"), handle_mention))
 
     await application.run_polling()
-    print("🛑 Бот остановлен")
 
 if __name__ == "__main__":
     asyncio.run(main())
