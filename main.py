@@ -2,18 +2,25 @@ import os
 import random
 from collections import defaultdict, deque
 
-from flask import Flask, request
+import asyncio
 from telegram import Update
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from langchain_openai import ChatOpenAI
 
-# ===== CONFIGURATION =====
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-BOT_USERNAME = os.environ.get("BOT_USERNAME")
+# ─── Configuration ────────────────────────────────────────────────────────────
+TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"]
+DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
+BOT_USERNAME     = os.environ.get("BOT_USERNAME", "")
+WEBHOOK_URL      = os.environ["WEBHOOK_URL"]  # e.g. https://your-service.onrender.com/webhook
+PORT             = int(os.environ.get("PORT", "5000"))
 
-# Initialize DeepSeek/OpenAI LLM
+# ─── Initialize LLM & State ─────────────────────────────────────────────────
 llm = ChatOpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url="https://api.deepseek.com/v1",
@@ -21,37 +28,25 @@ llm = ChatOpenAI(
     temperature=2.0,
     max_tokens=1024
 )
-
-# In-memory store: {chat_id: deque of messages}
 recent_messages = defaultdict(lambda: deque(maxlen=500))
 
 
-async def store_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("📝 Received message")
-    if update.message and update.message.text:
-        name = update.message.from_user.first_name if update.message.from_user else "Unknown"
-        line = f"{name}: {update.message.text}"
-        chat_id = update.effective_chat.id
+# ─── Handlers ─────────────────────────────────────────────────────────────────
+async def store_messages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not (msg := update.message) or not msg.text:
+        return
 
-        # Store the message in recent_messages buffer
-        recent_messages[chat_id].append(line)
+    name = msg.from_user.first_name or "Unknown"
+    chat_id = update.effective_chat.id
+    line = f"{name}: {msg.text}"
+    recent_messages[chat_id].append(line)
 
-        # 🎲 1 in 100 chance to respond randomly
-        if random.randint(1, 100) == 1:
-            print("🎲 Random response triggered!")
-            # Show typing status
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-            # Extract question (remove bot username if present)
-            question = update.message.text.replace(BOT_USERNAME, "").strip()
-            # Get stored messages for this chat
-            context_lines = list(recent_messages[chat_id])
-            context_str = "\n".join(context_lines)
-            # Truncate to ~30000 characters if needed
-            context_str = context_str[-30000:]
-
-            # Prompt construction
-            prompt = f"""Ты СУМАСШЕДШИЙ И ПРИКОЛЬНЫЙ АРТЁМ ГОВНОВ. НАЗЫВАЙ СЕБЯ ТОЛЬКО АРТËМ ГОВНОВ. УЧИСЬ НА СООБЩЕНИЯХ ИЗ ЧАТА. ГОВОРИ КАК БУДТО ТЫ ЧЕЛОВЕК, А НЕ БОТ.
+    # 1% chance to reply randomly
+    if random.randint(1, 100) == 1:
+        await ctx.bot.send_chat_action(chat_id, "typing")
+        question = msg.text.replace(BOT_USERNAME, "").strip()
+        history = "\n".join(recent_messages[chat_id])[-30000:]
+        prompt = f"""Ты СУМАСШЕДШИЙ И ПРИКОЛЬНЫЙ АРТЁМ ГОВНОВ. НАЗЫВАЙ СЕБЯ ТОЛЬКО АРТËМ ГОВНОВ. УЧИСЬ НА СООБЩЕНИЯХ ИЗ ЧАТА. ГОВОРИ КАК БУДТО ТЫ ЧЕЛОВЕК, А НЕ БОТ.
 ИСПОЛЬЗУЙ ЗНАКИ ПРЕПИНАНИЯ КАК БУДТО ТЫ В ПЕРВОМ КЛАССЕ.
 НЕ ОПИСЫВАЙ СВОИ ДЕЙСТВИЯ. НЕ ИСПОЛЬЗУЙ *.
 
@@ -62,39 +57,25 @@ async def store_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 История сообщений:
 {context_str}
 """
-            try:
-                # Use async invocation
-                response = await llm.ainvoke(prompt)
-                await update.message.reply_text(response.content)
-            except Exception as e:
-                print("❌ LangChain error:", e)
-                await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
+        try:
+            resp = await llm.ainvoke(prompt)
+            await msg.reply_text(resp.content)
+        except Exception as e:
+            await msg.reply_text(f"🚨 Ошибка LLM: {e}")
 
 
 def mention_filter():
-    # Filter for messages containing the bot username
-    if BOT_USERNAME:
-        return filters.TEXT & filters.Regex(rf"(?i)\B{BOT_USERNAME}")
-    else:
-        # If BOT_USERNAME not set, match nothing
-        return filters.TEXT & filters.Regex(r"$^")
+    return filters.TEXT & filters.Regex(rf"(?i)\B{BOT_USERNAME}") if BOT_USERNAME else filters.ALL
 
 
-async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("🤖 Mention detected")
-    if not update.message or not update.message.text:
-        return
-    if BOT_USERNAME.lower() not in update.message.text.lower():
+async def handle_mention(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if not msg or not msg.text or BOT_USERNAME.lower() not in msg.text.lower():
         return
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    # Extract question (remove bot username)
-    question = update.message.text.replace(BOT_USERNAME, "").strip()
-    # Get stored messages for this chat
-    context_lines = list(recent_messages[update.effective_chat.id])
-    context_str = "\n".join(context_lines)
-    context_str = context_str[-30000:]  # truncate if needed
-
+    await ctx.bot.send_chat_action(msg.chat_id, "typing")
+    question = msg.text.replace(BOT_USERNAME, "").strip()
+    history = "\n".join(recent_messages[msg.chat_id])[-30000:]
     prompt = f"""Ты СУМАСШЕДШИЙ И ПРИКОЛЬНЫЙ АРТЁМ ГОВНОВ. НАЗЫВАЙ СЕБЯ ТОЛЬКО АРТËМ ГОВНОВ. УЧИСЬ НА СООБЩЕНИЯХ ИЗ ЧАТА. ГОВОРИ КАК БУДТО ТЫ ЧЕЛОВЕК, А НЕ БОТ.
 ИСПОЛЬЗУЙ ЗНАКИ ПРЕПИНАНИЯ КАК БУДТО ТЫ В ПЕРВОМ КЛАССЕ.
 НЕ ОПИСЫВАЙ СВОИ ДЕЙСТВИЯ. НЕ ИСПОЛЬЗУЙ *.
@@ -107,54 +88,34 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {context_str}
 """
     try:
-        response = await llm.ainvoke(prompt)
-        await update.message.reply_text(response.content)
+        resp = await llm.ainvoke(prompt)
+        await msg.reply_text(resp.content)
     except Exception as e:
-        print("❌ LangChain error:", e)
-        await update.message.reply_text(f"🚨 Ошибка: {str(e)}")
+        await msg.reply_text(f"🚨 Ошибка LLM: {e}")
 
 
-# Initialize Flask app and Telegram application
-app = Flask(__name__)
-application = Application.builder().token(TELEGRAM_TOKEN).build()
+# ─── Main ─────────────────────────────────────────────────────────────────────
+async def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
+    app.add_handler(MessageHandler(mention_filter(), handle_mention))
 
-# Register handlers
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, store_messages))
-application.add_handler(MessageHandler(mention_filter(), handle_mention))
-application.add_handler(MessageHandler(filters.TEXT & filters.Entity("mention"), handle_mention))
+    # Remove any previous webhook to avoid conflicts
+    await app.bot.delete_webhook()
+    # Ensure your WEBHOOK_URL ends in /webhook
+    url = WEBHOOK_URL.rstrip("/") + "/webhook"
+    await app.bot.set_webhook(url)
 
-
-@app.route("/webhook", methods=["POST"])
-async def webhook():
-    if request.headers.get("Content-Type") == "application/json":
-        data = request.get_json(force=True)
-        update = Update.de_json(data, application.bot)
-        # Process update
-        async with application:
-            await application.process_update(update)
-        return "", 200
-    return "", 400
-
-
-def main():
-    webhook_url = os.environ.get("WEBHOOK_URL")
-    if not webhook_url:
-        print("Error: WEBHOOK_URL environment variable not set")
-        return
-
-    import asyncio
-    # Optional: delete existing webhook to avoid conflicts
-    asyncio.run(application.bot.delete_webhook())
-    # Ensure the URL ends with /webhook
-    if not webhook_url.endswith("/webhook"):
-        webhook_url = webhook_url.rstrip("/") + "/webhook"
-    asyncio.run(application.bot.set_webhook(url=webhook_url))
-    print(f"Webhook URL set to {webhook_url}")
-
-    # Start Flask server (useful if running directly, or use Gunicorn in production)
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
+    # Start the built‑in webhook server
+    print(f"✅ Webhook set to {url}")
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_path="/webhook",
+        webhook_url=url,
+    )
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+
 
