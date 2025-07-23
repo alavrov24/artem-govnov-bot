@@ -1,2 +1,5 @@
-python-telegram-bot==20.6
-langchain-openai==0.3.16
+
+python-telegram-bot==20.7
+langchain-openai==0.1.7
+flask==3.0.0
+asyncio
