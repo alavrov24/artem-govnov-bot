@@ -106,11 +106,11 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Use async invocation with timeout
         try:
-            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=30.0)
+            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=60.0)
             await update.message.reply_text(response.content)
         except asyncio.TimeoutError:
             logger.error("DeepSeek API timeout")
-            await update.message.reply_text("⏰ Время ответа истекло, попробуй еще раз")
+            await update.message.reply_text("⏰ ААА ЧЕ? Я ТЕБЯ ПРОСЛУШАЛ И ПРОПЕРДЕЛ!! ПОВТОРИ!!!")
         except Exception as api_error:
             logger.error(f"DeepSeek API error: {api_error}")
             await update.message.reply_text("🤖 Что-то пошло не так с моими мозгами")
