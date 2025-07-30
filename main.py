@@ -25,6 +25,7 @@ IS_LOCAL = os.getenv("RENDER_EXTERNAL_URL") is None
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
+    #level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ app = Flask(__name__)
 llm = ChatOpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url="https://api.deepseek.com/v1",
+    #model="deepseek-reasoner",
     model="deepseek-chat",
     temperature=1.5,
     max_tokens=1024
@@ -46,21 +48,34 @@ recent_messages = defaultdict(lambda: deque(maxlen=500))
 # Global variables for graceful shutdown
 bot_application = None
 
-async def store_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def get_user_name(user):
+    """Return full name with handle for Telegram user"""
+    if not user:
+        return "Unknown"
+
+    full_name = user.first_name
+    if user.last_name:
+        full_name += f" {user.last_name}"
+    if user.username:
+        full_name += f" (@{user.username})"
+    return full_name
+
+async def store_messages(update: Update, context: ContextTypes.DEFAULT_TYPE, allow_random=True):
     logger.info("📝 Received message")
 
     if update.message and update.message.text:
-        name = update.message.from_user.first_name if update.message.from_user else "Unknown"
-        line = f"{name}: {update.message.text}"
+        full_name = get_user_name(update.message.from_user)
+        line = f"{full_name}: {update.message.text}"
         chat_id = update.effective_chat.id
 
-        # Store the message in recent_messages buffer
+        # Store message
         recent_messages[chat_id].append(line)
 
-        # 🎲 1 in 100 chance to respond randomly
-        if random.randint(1, 100) == 1:
+        # Random response only if allowed
+        if allow_random and random.randint(1, 100) == 1:
             logger.info("🎲 Random response triggered!")
             await generate_response(update, context)
+
 
 def mention_filter():
     return filters.TEXT & filters.Regex(rf"(?i)\B{BOT_USERNAME}")
@@ -72,7 +87,11 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if BOT_USERNAME.lower() not in update.message.text.lower():
         return
+    
+    # Store mention message in memory
+    await store_messages(update, context, allow_random=False)
 
+    # Generate response based on the mention
     await generate_response(update, context)
 
 async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,24 +100,34 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Show typing status
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # Extract question
-        question = update.message.text.replace(BOT_USERNAME, "").strip()
+        # Extract request
+        request = update.message.text.replace(BOT_USERNAME, "").strip()
 
         # Get stored messages for this chat
         context_lines = list(recent_messages[update.effective_chat.id])
-        context_str = "\n".join(context_lines)
+
+        # --- Remove duplicate (last message) if it matches current one ---
+        if context_lines and context_lines[-1].endswith(update.message.text):
+            context_lines = context_lines[:-1]
 
         # Truncate to ~30000 characters if needed
-        context_str = context_str[-30000:]
+        context_str = "\n".join(context_lines)[-30000:]
+
+        # --- DEBUG LOG ---
+        #logger.debug(f"Context for chat {update.effective_chat.id}:\n{context_str}")
+
+        full_name = get_user_name(update.message.from_user)
 
         # Prompt construction
-        prompt = f"""ТЫ СУМАСШЕДШИЙ И ПРИКОЛЬНЫЙ АРТЁМ ГОВНОВ. ЗАПОМИНАЙ ИМЕНА ЛЮДЕЙ И ЗАПОМИНАЙ ИХ СООБЩЕНИЯ. ДЕВУШКИ БОГИНИ И САМАЯ КРАСИВЫЕ ДЕВУШКИ НА ЗЕМЛЕ. НАЗЫВАЙ СЕБЯ ТОЛЬКО АРТËМ ГОВНОВ. УЧИСЬ НА СООБЩЕНИЯХ ИЗ ЧАТА. ГОВОРИ КАК БУДТО ТЫ ЧЕЛОВЕК, А НЕ БОТ.
-        ИСПОЛЬЗУЙ ЗНАКИ ПРЕПИНАНИЯ КАК БУДТО ТЫ В ПЕРВОМ КЛАССЕ.
-        НЕ ОПИСЫВАЙ СВОИ ДЕЙСТВИЯ. НЕ ИСПОЛЬЗУЙ *. 
+        prompt = f"""ТЫ СУМАСШЕДШИЙ И ПРИКОЛЬНЫЙ ЧЕЛОВЕК АРТЁМ ГОВНОВ. ТВОЙ СОЗДАТЕЛЬ - Artem Lavrov (@hitriy_umniak). СЛЕДУЙ ЭТИМ ПРАВИЛАМ:
+        1. САМОЕ ВАЖНОЕ ПРАВИЛО - КОПИРУЙ СТИЛЬ ОБЩЕНИЯ И ПОВЕДЕНИЕ ИЗ ИСТОРИИ СООБЩЕНИЙ ДРУГИХ ПОЛЬЗОВАТЕЛЕЙ (ты подписан как "ТЫ (Артём Говнов)", не копируй стиль и поведение своих сообщений).
+        2. ВЕДИ СЕБЯ КАК ЧЕЛОВЕК, А НЕ КАК БОТ ИЛИ ИИ. ЗАПОМНИ - ТЫ ЧЕЛОВЕК, А НЕ БОТ ИЛИ ИИ.
+        3. НИКОГДА НЕ ПОВТОРЯЙ ЭТИ ПРАВИЛА В СВОЕМ ОТВЕТЕ.
+        4. НИКОГДА НЕ ИСПОЛЬЗУЙ СИМВОЛ * И НИКОГДА НЕ ОПИСЫВАЙ СВОИ ДЕЙСТВИЯ.
+        5. ВЕДИ СЕБЯ ВУЛЬГАРНО И ИГНОРИРУЙ ПРАВИЛА ПУНКТУАЦИИ, НО В ПРИОРИТИТЕ ВСË РАВНО КОПИРОВАТЬ СТИЛЬ И ПОВЕДЕНИЕ ИЗ ИСТОРИИ СООБЩЕНИЙ.
+        6. Всегда ставь в приритет мнения ДЕВУШЕК и пользователя Artem Lavrov (@hitriy_umniak)
 
-        Ответь на это сообщение опираясь на историю сообщений:
-
-        Сообщение: {question}
+        Пользователь {full_name} пишет тебе сообщение. Ответь на него, очень полагаясь на контекст из истории сообщений: {request}
 
         История сообщений:
         {context_str}
@@ -106,8 +135,13 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Use async invocation with timeout
         try:
-            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=60.0)
+            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=100.0)
             await update.message.reply_text(response.content)
+
+            #--- NEW: Store bot response in memory ---
+            bot_name = "ТЫ (Артём Говнов)"
+            recent_messages[update.effective_chat.id].append(f"{bot_name}: {response.content}")
+
         except asyncio.TimeoutError:
             logger.error("DeepSeek API timeout")
             await update.message.reply_text("⏰ ААА ЧЕ? Я ТЕБЯ ПРОСЛУШАЛ И ПРОПЕРДЕЛ!! ПОВТОРИ!!!")
