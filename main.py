@@ -147,6 +147,7 @@ async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         </chat_history>
 
         <user_message>
+        Ответь на сообщение пользователя:
         {full_name}: {request}
         </user_message>
         """
