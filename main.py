@@ -46,7 +46,7 @@ GROUP_MEMBERS = {
         (383256180, "Артём"),
         (541684214, "Даня Хомчуков"),
         (804158128, "Ваня"),
-        (804158128, "Кристина"),
+        (1271030478, "Кристина"),
         (973955891, "Мелания"),
         (1078608821, "Даня Чернов"),
         (953831319, "Костя"),
@@ -61,7 +61,7 @@ GROUP_MEMBERS = {
         (650181650, "Слава"),
         (1313847394, "Катя"),
         (758675191, "Георгий"),
-        (1118763059, "Лиза Ошканова")        
+        #(1118763059, "Лиза Ошканова")        
     ],
     
     # Add more groups as needed
@@ -334,7 +334,7 @@ async def store_messages(update: Update, context: ContextTypes.DEFAULT_TYPE, all
             recent_messages[chat_id].append(line)
 
             # Random response only if allowed and it's a text message
-            if allow_random and update.message.text and random.randint(1, 100) == 1:
+            if allow_random and update.message.text and random.randint(1, 10000) == 1:
                 logger.info("🎲 Random response triggered!")
                 await generate_response(update, context)
 
